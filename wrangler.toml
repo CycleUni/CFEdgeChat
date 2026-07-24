@@ -1,0 +1,32 @@
+name = "cfedgechat"
+main = "src/index.ts"
+compatibility_date = "2024-04-05"
+
+[vars]
+# EDGE_CHAT_JWT_SECRET will be provided via `wrangler secret put EDGE_CHAT_JWT_SECRET`
+# DJANGO_WEBHOOK_URL = "http://localhost:8000/api/v1/messaging/webhook/edge-chat/" (Can be set in environment variables)
+# DJANGO_WEBHOOK_SECRET must match Django's EDGE_CHAT_WEBHOOK_SECRET setting —
+# sent as the X-Webhook-Secret header on every call to DJANGO_WEBHOOK_URL.
+# Django rejects the call with 403 if this is missing or doesn't match.
+# APP_ORIGINS = "https://cycleuni.example.com" (comma-separated). Required in
+# any deployed environment — the Worker refuses to serve CORS headers
+# (returns 500) when APP_ORIGINS is unset, UNLESS ENVIRONMENT="development".
+# ENVIRONMENT = "development" — set only for local dev (e.g. in .dev.vars).
+# Enables the wildcard ("*") CORS fallback when APP_ORIGINS is unset. Leave
+# unset/anything else in every deployed environment.
+
+[[durable_objects.bindings]]
+name = "CHAT_ROOM"
+class_name = "ChatRoom"
+
+[[durable_objects.bindings]]
+name = "USER_HUB"
+class_name = "UserHub"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ChatRoom"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["UserHub"]
