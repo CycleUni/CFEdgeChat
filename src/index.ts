@@ -65,7 +65,10 @@ function withCors(response: Response, request: Request, env: Env): Response {
   } catch (e) {
     if (e instanceof CorsConfigError) {
       console.error(e.message);
-      return new Response("Chat service misconfigured", { status: 500 });
+      // Include the variable name in the client-visible body (not a secret
+      // value, just which check failed) so a misconfiguration is diagnosable
+      // straight from a browser's Network tab, without needing Worker logs.
+      return new Response("Chat service misconfigured: APP_ORIGINS not set", { status: 500 });
     }
     throw e;
   }
@@ -109,7 +112,7 @@ export default {
       } catch (e) {
         if (e instanceof CorsConfigError) {
           console.error(e.message);
-          return new Response("Chat service misconfigured", { status: 500 });
+          return new Response("Chat service misconfigured: APP_ORIGINS not set", { status: 500 });
         }
         throw e;
       }
@@ -117,7 +120,7 @@ export default {
 
     if (!env.EDGE_CHAT_JWT_SECRET || env.EDGE_CHAT_JWT_SECRET.length < 32) {
       console.error("EDGE_CHAT_JWT_SECRET is missing or too short (need >= 32 chars)");
-      return withCors(new Response("Chat service misconfigured", { status: 500 }), request, env);
+      return withCors(new Response("Chat service misconfigured: EDGE_CHAT_JWT_SECRET missing or invalid", { status: 500 }), request, env);
     }
 
     const url = new URL(request.url);

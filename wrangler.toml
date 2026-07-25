@@ -8,12 +8,29 @@ compatibility_date = "2024-04-05"
 # DJANGO_WEBHOOK_SECRET must match Django's EDGE_CHAT_WEBHOOK_SECRET setting —
 # sent as the X-Webhook-Secret header on every call to DJANGO_WEBHOOK_URL.
 # Django rejects the call with 403 if this is missing or doesn't match.
-# APP_ORIGINS = "https://cycleuni.example.com" (comma-separated). Required in
-# any deployed environment — the Worker refuses to serve CORS headers
-# (returns 500) when APP_ORIGINS is unset, UNLESS ENVIRONMENT="development".
-# ENVIRONMENT = "development" — set only for local dev (e.g. in .dev.vars).
-# Enables the wildcard ("*") CORS fallback when APP_ORIGINS is unset. Leave
-# unset/anything else in every deployed environment.
+#
+# APP_ORIGINS / ENVIRONMENT — IMPORTANT deploy gotcha:
+# Everything under [vars] here is the SOURCE OF TRUTH for plain (non-secret)
+# environment variables. Every `wrangler deploy` (including Cloudflare's
+# git-integrated "Workers Builds" auto-deploy on push) resets plain vars to
+# exactly what's listed here — a value entered as a plain "Environment
+# Variable" in the dashboard's Settings > Variables tab will be WIPED again
+# on the next deploy if it isn't also present in this file. This is why
+# "I set it in the dashboard and the error keeps coming back" happens.
+# True secrets (EDGE_CHAT_JWT_SECRET, DJANGO_WEBHOOK_SECRET, or APP_ORIGINS/
+# ENVIRONMENT added via `wrangler secret put` / the dashboard's "Encrypt"
+# toggle) are NOT managed here and DO persist across deploys — if you set
+# APP_ORIGINS as a secret and still see "Chat service misconfigured: APP_ORIGINS
+# not set" after redeploying, double-check for a typo in the variable name
+# (case-sensitive) or that it was set on the correct Worker/environment,
+# and check the Worker's real-time logs (`wrangler tail`, or the dashboard's
+# Logs tab) for the exact console.error line — it names precisely which
+# check failed.
+#
+# Since APP_ORIGINS/ENVIRONMENT aren't secret values, the simplest fix is to
+# just set them here directly instead of via the dashboard, e.g.:
+# APP_ORIGINS = "https://cycleunife.pages.dev"
+# (comma-separated if there's more than one deployed frontend origin)
 
 [[durable_objects.bindings]]
 name = "CHAT_ROOM"
