@@ -137,7 +137,7 @@ export class UserHub extends DurableObject<Env> {
     unread.add(roomId);
     await this.ctx.storage.put("unread", [...unread]);
     await this.ctx.storage.put("count", unread.size);
-    const msg = JSON.stringify({ type: "unread_count", count: unread.size });
+    const msg = JSON.stringify({ type: "unread_count", count: unread.size, unread: [...unread] });
     for (const ws of this.ctx.getWebSockets()) {
       try {
         ws.send(msg);
@@ -164,7 +164,7 @@ export class UserHub extends DurableObject<Env> {
     await this.ctx.storage.put("unread", [...unread]);
     await this.ctx.storage.put("lastReadAt", lastReadAt);
     await this.ctx.storage.put("count", unread.size);
-    const msg = JSON.stringify({ type: "unread_count", count: unread.size });
+    const msg = JSON.stringify({ type: "unread_count", count: unread.size, unread: [...unread] });
     for (const ws of this.ctx.getWebSockets()) {
       try {
         ws.send(msg);
