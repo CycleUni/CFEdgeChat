@@ -28,9 +28,27 @@ compatibility_date = "2024-04-05"
 # check failed.
 #
 # Since APP_ORIGINS/ENVIRONMENT aren't secret values, the simplest fix is to
-# just set them here directly instead of via the dashboard, e.g.:
-# APP_ORIGINS = "https://cycleunife.pages.dev"
-# (comma-separated if there's more than one deployed frontend origin)
+# just set them here directly instead of via the dashboard.
+#
+# ─── DEPLOY GOTCHA (read before deploying) ────────────────────────────
+# APP_ORIGINS MUST be set here (under [vars]), NOT only via the Cloudflare
+# dashboard's Settings > Variables > Environment Variables tab. Why: every
+# `wrangler deploy` (including the git-integrated "Workers Builds" auto-deploy
+# on push) RESETS plain environment variables to exactly what is listed under
+# [vars] in this file. A value entered only in the dashboard gets WIPED on the
+# next deploy, and the Worker starts emitting
+# "Chat service misconfigured: APP_ORIGINS not set" again even though the
+# dashboard still shows the value while the deploy is in-flight.
+#
+# ENVIRONMENT (optional, e.g. "production" / "staging") follows the same rule.
+# Secrets (EDGE_CHAT_JWT_SECRET, DJANGO_WEBHOOK_SECRET) are NOT affected and
+# persist across deploys — manage those with `wrangler secret put` instead.
+#
+# Before deploying to production, REPLACE the localhost origins below with the
+# real production frontend origin(s), comma-separated, e.g.:
+#   APP_ORIGINS = "https://cycleunife.pages.dev,https://www.cycleuni.tw"
+APP_ORIGINS = "http://localhost:4200,http://127.0.0.1:4200"
+# ENVIRONMENT = "production"
 
 [[durable_objects.bindings]]
 name = "CHAT_ROOM"
