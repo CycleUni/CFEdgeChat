@@ -43,7 +43,10 @@ function corsHeaders(request: Request, env: Env): Record<string, string> {
     return {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      // ngsw-bypass: the frontend sets this on every CFEdgeChat request so
+      // Angular's service worker passes it straight through instead of
+      // intercepting a cross-origin request it doesn't own.
+      "Access-Control-Allow-Headers": "Content-Type, Authorization, ngsw-bypass",
     };
   }
 
