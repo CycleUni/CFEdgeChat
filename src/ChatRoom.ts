@@ -77,6 +77,19 @@ export class ChatRoom extends DurableObject<Env> {
       )
     `);
 
+    // Schema migration: add columns that may not exist in Durable Object
+    // instances created before the image feature was deployed. SQLite's
+    // CREATE TABLE IF NOT EXISTS only creates the table on first use —
+    // it does NOT add new columns to an already-existing table, so any
+    // room that existed before this deploy would be missing message_type
+    // and metadata, causing every INSERT to throw a "no such column" error.
+    try {
+      this.ctx.storage.sql.exec(`ALTER TABLE messages ADD COLUMN message_type TEXT DEFAULT 'text'`);
+    } catch (_) { /* column already exists in newer DO instances — expected */ }
+    try {
+      this.ctx.storage.sql.exec(`ALTER TABLE messages ADD COLUMN metadata TEXT`);
+    } catch (_) { /* column already exists in newer DO instances — expected */ }
+
     // Per-user "delete for me" marks. A message is only purged from
     // `messages` once both participants of the (2-party) room have marked
     // it deleted here.
