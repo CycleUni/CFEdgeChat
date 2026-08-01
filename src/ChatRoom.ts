@@ -16,6 +16,8 @@ interface Message {
   user_id: string;
   content: string;
   timestamp: number;
+  message_type?: "text" | "image";
+  metadata?: Record<string, unknown>;
 }
 
 const MAX_MESSAGE_LENGTH = 4000;
@@ -34,6 +36,19 @@ const SYSTEM_MESSAGE_PREFIXES = [
   "[MEETUP_DECLINE]",
   "[MEETUP_CANCEL]",
 ] as const;
+
+// Inbox-preview placeholder for an image message, sent to Django's inbox
+// mirror and to both participants' hubs. Carries an i18n key rather than
+// literal text: this preview is persisted server-side and shown to *both*
+// participants, who may be reading in different languages, so it can't be
+// resolved at write time. Same [SYSTEM:<key>] convention the backend uses for
+// order notifications; the frontend resolves it per viewer.
+//
+// Note this is only ever a *derived preview*, never inbound message content,
+// so it does not trip the isSystemMessage() guard below (which rejects
+// user-role senders using system prefixes) — the message body itself stays
+// the image URL.
+const IMAGE_PREVIEW_TOKEN = "[SYSTEM:msg.imagePlaceholder]";
 
 function isSystemMessage(content: string): boolean {
   return SYSTEM_MESSAGE_PREFIXES.some(prefix => content.startsWith(prefix));
@@ -56,7 +71,9 @@ export class ChatRoom extends DurableObject<Env> {
         id TEXT PRIMARY KEY,
         user_id TEXT,
         content TEXT,
-        timestamp INTEGER
+        timestamp INTEGER,
+        message_type TEXT DEFAULT 'text',
+        metadata TEXT
       )
     `);
 
@@ -165,7 +182,11 @@ export class ChatRoom extends DurableObject<Env> {
         userId, limit
       );
 
-      const messages = [...cursor].reverse(); // Output in chronological order
+      const messages = [...cursor].map(row => ({
+        ...row,
+        message_type: row.message_type || "text",
+        metadata: row.metadata ? JSON.parse(row.metadata as string) : null
+      })).reverse(); // Output in chronological order
       return Response.json(messages);
     }
 
@@ -178,19 +199,32 @@ export class ChatRoom extends DurableObject<Env> {
       } catch (e) {}
 
       const content = bodyData.content;
+      const messageType = bodyData.message_type || "text";
+      const metadata = bodyData.metadata || null;
+
       if (!content || typeof content !== "string") {
         return new Response("Missing content", { status: 400 });
       }
 
-      if (content.length > MAX_MESSAGE_LENGTH) {
+      if (messageType === "text" && content.length > MAX_MESSAGE_LENGTH) {
         return new Response(`Message too long (max ${MAX_MESSAGE_LENGTH} chars)`, { status: 400 });
+      }
+
+      if (messageType === "image") {
+        try {
+          new URL(content);
+        } catch {
+          return new Response("Image content must be a valid URL", { status: 400 });
+        }
+        if (metadata && typeof metadata !== "object") {
+          return new Response("Metadata must be an object", { status: 400 });
+        }
       }
 
       if (this.isRestRateLimited(userId)) {
         return new Response("Too Many Requests", { status: 429 });
       }
 
-      // Block system message prefixes for non-system roles
       if (role === "user" && isSystemMessage(content)) {
         return new Response(JSON.stringify({ code: "FORBIDDEN_SYSTEM_MESSAGE", message: "Users cannot send system messages" }), { status: 403 });
       }
@@ -199,8 +233,8 @@ export class ChatRoom extends DurableObject<Env> {
       const timestamp = Date.now();
 
       this.ctx.storage.sql.exec(
-        `INSERT INTO messages (id, user_id, content, timestamp) VALUES (?, ?, ?, ?)`,
-        msgId, userId, content, timestamp
+        `INSERT INTO messages (id, user_id, content, timestamp, message_type, metadata) VALUES (?, ?, ?, ?, ?, ?)`,
+        msgId, userId, content, timestamp, messageType, metadata ? JSON.stringify(metadata) : null
       );
 
       const broadcastMsg = JSON.stringify({
@@ -209,6 +243,8 @@ export class ChatRoom extends DurableObject<Env> {
           id: msgId,
           user_id: userId,
           content,
+          message_type: messageType,
+          metadata,
           timestamp
         }
       });
@@ -243,25 +279,7 @@ export class ChatRoom extends DurableObject<Env> {
       if (participantIdsParam) await this.ctx.storage.put("participantIds", participantIds);
 
       if (roomId && participantIds && Array.isArray(participantIds)) {
-        for (const pId of participantIds) {
-          try {
-            const hubId = this.env.USER_HUB.idFromName(pId);
-            const hubStub = this.env.USER_HUB.get(hubId);
-            await hubStub.fetch(
-              new Request("http://internal/push", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  type: "room_update",
-                  room_id: roomId,
-                  sender_id: userId,
-                  preview: content.length > 50 ? content.slice(0, 50) + "..." : content,
-                  timestamp
-                })
-              })
-            );
-          } catch (e) {}
-        }
+        await this.pushToHubs(roomId, userId, content, timestamp, messageType);
       }
 
       return Response.json({ id: msgId, timestamp });
@@ -314,8 +332,31 @@ export class ChatRoom extends DurableObject<Env> {
       const data = JSON.parse(message);
 
       if (data.type === "message" && data.content) {
-        if (typeof data.content !== "string" || data.content.length > MAX_MESSAGE_LENGTH) {
-          this.sendToSender(ws, { type: "error", message: `Message too long (max ${MAX_MESSAGE_LENGTH} chars)` });
+        const messageType = data.message_type || "text";
+        const metadata = data.metadata || null;
+
+        if (messageType === "text") {
+          if (typeof data.content !== "string" || data.content.length > MAX_MESSAGE_LENGTH) {
+            this.sendToSender(ws, { type: "error", message: `Message too long (max ${MAX_MESSAGE_LENGTH} chars)` });
+            return;
+          }
+        } else if (messageType === "image") {
+          if (typeof data.content !== "string") {
+            this.sendToSender(ws, { type: "error", message: "Image content must be a string URL" });
+            return;
+          }
+          try {
+            new URL(data.content);
+          } catch {
+            this.sendToSender(ws, { type: "error", message: "Image content must be a valid URL" });
+            return;
+          }
+          if (metadata && typeof metadata !== "object") {
+            this.sendToSender(ws, { type: "error", message: "Metadata must be an object" });
+            return;
+          }
+        } else {
+          this.sendToSender(ws, { type: "error", message: "Invalid message_type" });
           return;
         }
 
@@ -329,8 +370,8 @@ export class ChatRoom extends DurableObject<Env> {
         const timestamp = Date.now();
 
         this.ctx.storage.sql.exec(
-          `INSERT INTO messages (id, user_id, content, timestamp) VALUES (?, ?, ?, ?)`,
-          msgId, userId, data.content, timestamp
+          `INSERT INTO messages (id, user_id, content, timestamp, message_type, metadata) VALUES (?, ?, ?, ?, ?, ?)`,
+          msgId, userId, data.content, timestamp, messageType, metadata ? JSON.stringify(metadata) : null
         );
 
         const broadcastMsg = JSON.stringify({
@@ -339,6 +380,8 @@ export class ChatRoom extends DurableObject<Env> {
             id: msgId,
             user_id: userId,
             content: data.content,
+            message_type: messageType,
+            metadata,
             timestamp: timestamp
           }
         });
@@ -367,14 +410,15 @@ export class ChatRoom extends DurableObject<Env> {
 
         // Trigger Webhook for Django to update Inbox Preview and optionally send push notifications
         if (roomId && this.env.DJANGO_WEBHOOK_URL && this.isWebhookUrlAllowed(this.env.DJANGO_WEBHOOK_URL)) {
-          this.triggerOfflineWebhook(roomId, userId, data.content, !otherUsersConnected);
+          const webhookContent = messageType === "image" ? IMAGE_PREVIEW_TOKEN : data.content;
+          this.triggerOfflineWebhook(roomId, userId, webhookContent, !otherUsersConnected);
         }
 
         // Notify both participants' single per-user hub connections (not
         // just the one other socket in *this* room) so the inbox sidebar
         // can show a live preview/unread badge for a conversation the
         // recipient doesn't currently have open.
-        await this.pushToHubs(roomId, userId, data.content, timestamp);
+        await this.pushToHubs(roomId, userId, data.content, timestamp, messageType);
       } else if (data.type === "delete" && data.id) {
         this.deleteMessageForUser(ws, userId, data.id);
       }
@@ -421,11 +465,16 @@ export class ChatRoom extends DurableObject<Env> {
   // latest preview) but is told `self: true` so the hub knows to skip the
   // unread increment — sending a message doesn't mark YOUR inbox as
   // having something new to read.
-  private async pushToHubs(roomId: string | undefined, senderId: string, content: string, timestamp: number) {
+  private async pushToHubs(roomId: string | undefined, senderId: string, content: string, timestamp: number, messageType: string = "text") {
     const participantIds = await this.ctx.storage.get<string[]>("participantIds");
     if (!roomId || !participantIds) return;
 
-    const preview = content.length > 200 ? content.slice(0, 200) : content;
+    let preview: string;
+    if (messageType === "image") {
+      preview = IMAGE_PREVIEW_TOKEN;
+    } else {
+      preview = content.length > 200 ? content.slice(0, 200) : content;
+    }
     await Promise.all(participantIds.map(participantId => {
       const hubId = this.env.USER_HUB.idFromName(participantId);
       const hubStub = this.env.USER_HUB.get(hubId);
@@ -438,9 +487,6 @@ export class ChatRoom extends DurableObject<Env> {
           sender_id: senderId,
           preview,
           timestamp,
-          // UserHub uses this to avoid incrementing the sender's unread set
-          // — pre-existing line was always omitted, so every send used to
-          // increase the sender's badge by 1.
           self: isSelf,
         }),
       }).catch(e => console.error("Hub push failed", e));
