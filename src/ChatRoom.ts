@@ -183,23 +183,54 @@ export class ChatRoom extends DurableObject<Env> {
 
     if (request.method === "GET" && url.pathname.endsWith("/messages")) {
       // Fetch historical messages, excluding ones this user has deleted for themselves
-      const limit = parseInt(url.searchParams.get("limit") || "50", 10);
+      const requestedLimit = parseInt(url.searchParams.get("limit") || "50", 10);
+      // Clamp: a caller asking for everything would otherwise pull an entire
+      // room's history into memory in one response.
+      const limit = Math.min(Math.max(Number.isFinite(requestedLimit) ? requestedLimit : 50, 1), 200);
       const userId = url.searchParams.get("userId") || "";
+      // Keyset pagination for scrolling back through history: return the page
+      // of messages immediately older than this timestamp. Absent on the
+      // first request, which just takes the newest page.
+      const beforeParam = url.searchParams.get("before");
+      const before = beforeParam !== null ? parseInt(beforeParam, 10) : null;
+      const hasBefore = before !== null && Number.isFinite(before);
 
-      const cursor = this.ctx.storage.sql.exec(
-        `SELECT m.* FROM messages m
-         WHERE NOT EXISTS (
-           SELECT 1 FROM message_deletions d WHERE d.message_id = m.id AND d.user_id = ?
-         )
-         ORDER BY timestamp DESC LIMIT ?`,
-        userId, limit
-      );
+      // One extra row than asked for, purely to detect whether another page
+      // exists — cheaper and race-free compared to a separate COUNT query.
+      const probeLimit = limit + 1;
+      const cursor = hasBefore
+        ? this.ctx.storage.sql.exec(
+            `SELECT m.* FROM messages m
+             WHERE NOT EXISTS (
+               SELECT 1 FROM message_deletions d WHERE d.message_id = m.id AND d.user_id = ?
+             ) AND m.timestamp < ?
+             ORDER BY timestamp DESC LIMIT ?`,
+            userId, before, probeLimit
+          )
+        : this.ctx.storage.sql.exec(
+            `SELECT m.* FROM messages m
+             WHERE NOT EXISTS (
+               SELECT 1 FROM message_deletions d WHERE d.message_id = m.id AND d.user_id = ?
+             )
+             ORDER BY timestamp DESC LIMIT ?`,
+            userId, probeLimit
+          );
 
-      const messages = [...cursor].map(row => ({
+      const rows = [...cursor];
+      const hasMore = rows.length > limit;
+      const messages = rows.slice(0, limit).map(row => ({
         ...row,
         message_type: row.message_type || "text",
         metadata: row.metadata ? JSON.parse(row.metadata as string) : null
       })).reverse(); // Output in chronological order
+
+      // Paginated callers need to know whether to keep offering "load older".
+      // Only they opt into the envelope: returning a bare array to everyone
+      // else keeps existing clients (and the pre-pagination app still in
+      // users' browsers after a deploy) working unchanged.
+      if (url.searchParams.get("paginated") === "1") {
+        return Response.json({ messages, has_more: hasMore });
+      }
       return Response.json(messages);
     }
 
