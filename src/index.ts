@@ -10,7 +10,7 @@ export interface Env {
   EDGE_CHAT_JWT_SECRET: string;
   DJANGO_WEBHOOK_URL?: string;
   // Comma-separated list of allowed frontend origins, e.g.
-  // "https://cycleuni.example.com,https://staging.cycleuni.example.com".
+  // "https://unibooks.example.com,https://staging.unibooks.example.com".
   // Required in any deployed environment. May be left unset only when
   // ENVIRONMENT=development (see corsHeaders below), which permits a
   // wildcard fallback for local dev.

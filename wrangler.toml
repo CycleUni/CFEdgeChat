@@ -19,7 +19,7 @@ compatibility_date = "2024-04-05"
 # Instead, set them as Worker secrets, which persist across deploys and are
 # read the same way via `env.APP_ORIGINS` / `env.ENVIRONMENT`:
 #   wrangler secret put APP_ORIGINS
-#     (comma-separated, e.g. "https://cycleunife.pages.dev,https://www.cycleuni.tw")
+#     (comma-separated, e.g. "https://unibooks.pages.dev,https://www.unibooks.tw")
 #   wrangler secret put ENVIRONMENT
 #     (only needed for local/staging to opt into the wildcard CORS fallback —
 #     set to "development"; omit entirely in production)

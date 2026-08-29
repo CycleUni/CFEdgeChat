@@ -21,7 +21,7 @@ DJANGO_WEBHOOK_URL=
 # webhook with 403 (offline recipients won't get preview/unread sync).
 DJANGO_WEBHOOK_SECRET=
 # Allowed frontend origins (comma-separated), e.g.
-# https://cycleuni.example.com,https://staging.cycleuni.example.com.
+# https://unibooks.example.com,https://staging.unibooks.example.com.
 # Required in production; if missing, the Worker refuses to serve CORS
 # headers (returns 500) unless ENVIRONMENT=development.
 APP_ORIGINS=
