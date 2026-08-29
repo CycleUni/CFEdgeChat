@@ -9,15 +9,15 @@
 
 # ---- Required, no default (missing or under 32 chars returns 500; see src/index.ts) ----
 # Production: wrangler secret put EDGE_CHAT_JWT_SECRET
-# Local dev: put in .dev.vars, must exactly match CycleUni-BE's EDGE_CHAT_JWT_SECRET
+# Local dev: put in .dev.vars, must exactly match UniBooks-BE's EDGE_CHAT_JWT_SECRET
 EDGE_CHAT_JWT_SECRET=
 
 # ---- Optional (feature degrades gracefully if unset, not startup-blocking) ----
-# Webhook called on new/offline messages to CycleUni-BE; local default
+# Webhook called on new/offline messages to UniBooks-BE; local default
 # http://127.0.0.1:8000/api/v1/messaging/webhook/edge-chat/
 DJANGO_WEBHOOK_URL=
 # X-Webhook-Secret sent with DJANGO_WEBHOOK_URL calls, must exactly match
-# CycleUni-BE's EDGE_CHAT_WEBHOOK_SECRET. If unset, Django rejects the
+# UniBooks-BE's EDGE_CHAT_WEBHOOK_SECRET. If unset, Django rejects the
 # webhook with 403 (offline recipients won't get preview/unread sync).
 DJANGO_WEBHOOK_SECRET=
 # Allowed frontend origins (comma-separated), e.g.
