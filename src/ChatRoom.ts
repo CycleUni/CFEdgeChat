@@ -261,7 +261,10 @@ export class ChatRoom extends DurableObject<Env> {
 
       if (messageType === "image") {
         if (!this.isImageUrlAllowed(content)) {
-          return new Response("Image content must be an https URL on an allowed host", { status: 400 });
+          return new Response(JSON.stringify({
+            code: "IMAGE_URL_NOT_ALLOWED",
+            message: "Image content must be an https URL on an allowed host",
+          }), { status: 400 });
         }
         if (metadata && typeof metadata !== "object") {
           return new Response("Metadata must be an object", { status: 400 });
@@ -393,7 +396,14 @@ export class ChatRoom extends DurableObject<Env> {
             return;
           }
           if (!this.isImageUrlAllowed(data.content)) {
-            this.sendToSender(ws, { type: "error", message: "Image content must be an https URL on an allowed host" });
+            // Coded like FORBIDDEN_SYSTEM_MESSAGE: the client has to tell this
+            // refusal apart from a generic send failure to explain it, and the
+            // sentence is only what this room happens to say today.
+            this.sendToSender(ws, {
+              type: "error",
+              code: "IMAGE_URL_NOT_ALLOWED",
+              message: "Image content must be an https URL on an allowed host",
+            });
             return;
           }
           if (metadata && typeof metadata !== "object") {
