@@ -29,3 +29,7 @@ APP_ORIGINS=
 # Worker fall back to wildcard ("*") CORS when APP_ORIGINS is unset. Must not
 # be set in production.
 ENVIRONMENT=
+# Hostnames an image message may point at, comma-separated — in production
+# the R2 public domain UniBooks-BE issues upload URLs for (R2_PUBLIC_URL's
+# host). Unset = any https host (local dev). See ChatRoom.isImageUrlAllowed.
+ALLOWED_IMAGE_HOSTS=

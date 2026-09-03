@@ -9,6 +9,11 @@ export interface Env {
   // here (X-Webhook-Secret header) — without it Django now rejects the
   // request with 403, so the offline-message webhook silently no-ops.
   DJANGO_WEBHOOK_SECRET?: string;
+  // Comma-separated hostnames an image message may point at (the R2 public
+  // domain in production). Unset = any https host, which is fine for local
+  // dev but lets a participant paste a tracking pixel in production; see
+  // isImageUrlAllowed.
+  ALLOWED_IMAGE_HOSTS?: string;
 }
 
 interface Message {
@@ -255,10 +260,8 @@ export class ChatRoom extends DurableObject<Env> {
       }
 
       if (messageType === "image") {
-        try {
-          new URL(content);
-        } catch {
-          return new Response("Image content must be a valid URL", { status: 400 });
+        if (!this.isImageUrlAllowed(content)) {
+          return new Response("Image content must be an https URL on an allowed host", { status: 400 });
         }
         if (metadata && typeof metadata !== "object") {
           return new Response("Metadata must be an object", { status: 400 });
@@ -389,10 +392,8 @@ export class ChatRoom extends DurableObject<Env> {
             this.sendToSender(ws, { type: "error", message: "Image content must be a string URL" });
             return;
           }
-          try {
-            new URL(data.content);
-          } catch {
-            this.sendToSender(ws, { type: "error", message: "Image content must be a valid URL" });
+          if (!this.isImageUrlAllowed(data.content)) {
+            this.sendToSender(ws, { type: "error", message: "Image content must be an https URL on an allowed host" });
             return;
           }
           if (metadata && typeof metadata !== "object") {
@@ -535,6 +536,30 @@ export class ChatRoom extends DurableObject<Env> {
         }),
       }).catch(e => console.error("Hub push failed", e));
     }));
+  }
+
+  // An image message is rendered as <img src> in every participant's
+  // browser, so its URL is the one piece of user input that makes the other
+  // party's browser fetch from an arbitrary server. https only (http is
+  // allowed for the local-dev media server), and when ALLOWED_IMAGE_HOSTS is
+  // configured the host must be on it — normally just the R2 public domain
+  // the upload endpoints issue.
+  private isImageUrlAllowed(rawUrl: string): boolean {
+    let parsed: URL;
+    try {
+      parsed = new URL(rawUrl);
+    } catch {
+      return false;
+    }
+    const isLocalHttp =
+      parsed.protocol === "http:" && (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1");
+    if (parsed.protocol !== "https:" && !isLocalHttp) return false;
+    const allowlist = (this.env.ALLOWED_IMAGE_HOSTS || "")
+      .split(",")
+      .map(h => h.trim().toLowerCase())
+      .filter(Boolean);
+    if (allowlist.length === 0) return true;
+    return allowlist.includes(parsed.hostname.toLowerCase());
   }
 
   // DJANGO_WEBHOOK_URL is operator-set config, not attacker-controlled input,
