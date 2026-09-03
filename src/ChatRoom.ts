@@ -61,7 +61,11 @@ function isSystemMessage(content: string): boolean {
 
 interface ConnectionState {
   userId: string;
-  role: "user" | "system"; // Track role from JWT
+  // Track role from JWT. "observer" is a moderator reading a reported
+  // conversation: the token Django mints for that view proves nothing about
+  // membership of the room, so it may read and must not write. Without it a
+  // moderator opening a report could type into the room as themselves.
+  role: "user" | "system" | "observer";
   // Sliding count of messages sent within the current rate-limit window.
   windowStart: number;
   windowCount: number;
@@ -169,7 +173,7 @@ export class ChatRoom extends DurableObject<Env> {
       // survives that eviction; a plain instance Map would silently lose
       // entries. See webSocketMessage() for the matching read side.
       this.ctx.acceptWebSocket(server);
-      const role = (url.searchParams.get("role") as "user" | "system") || "user";
+      const role = (url.searchParams.get("role") as ConnectionState["role"]) || "user";
       const state: ConnectionState = { userId, role, windowStart: Date.now(), windowCount: 0 };
       server.serializeAttachment(state);
 
@@ -273,6 +277,13 @@ export class ChatRoom extends DurableObject<Env> {
 
       if (this.isRestRateLimited(userId)) {
         return new Response("Too Many Requests", { status: 429 });
+      }
+
+      if (role === "observer") {
+        return new Response(JSON.stringify({
+          code: "READ_ONLY_TOKEN",
+          message: "This token may read the room but not write to it",
+        }), { status: 403 });
       }
 
       if (role === "user" && isSystemMessage(content)) {
@@ -380,6 +391,16 @@ export class ChatRoom extends DurableObject<Env> {
 
     try {
       const data = JSON.parse(message);
+
+      if (state.role === "observer" && (data.type === "message" || data.type === "delete")) {
+        // Reading a reported conversation is not membership of it.
+        this.sendToSender(ws, {
+          type: "error",
+          code: "READ_ONLY_TOKEN",
+          message: "This token may read the room but not write to it",
+        });
+        return;
+      }
 
       if (data.type === "message" && data.content) {
         const messageType = data.message_type || "text";
