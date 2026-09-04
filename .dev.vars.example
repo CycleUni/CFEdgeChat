@@ -29,7 +29,9 @@ APP_ORIGINS=
 # Worker fall back to wildcard ("*") CORS when APP_ORIGINS is unset. Must not
 # be set in production.
 ENVIRONMENT=
-# Hostnames an image message may point at, comma-separated — in production
-# the R2 public domain UniBooks-BE issues upload URLs for (R2_PUBLIC_URL's
-# host). Unset = any https host (local dev). See ChatRoom.isImageUrlAllowed.
+# Hosts an image message may point at, comma-separated. In production this is
+# the R2 public domain UniBooks-BE issues upload URLs for — set it to the same
+# value as Django's R2_PUBLIC_URL, which can be pasted as-is: both
+# "https://media.example.com" and a bare "media.example.com" are accepted.
+# Unset = any https host (local dev). See src/imageUrlPolicy.ts.
 ALLOWED_IMAGE_HOSTS=

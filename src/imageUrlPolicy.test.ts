@@ -111,4 +111,38 @@ describe("parseAllowedImageHosts", () => {
     expect(parseAllowedImageHosts("")).toEqual([]);
     expect(parseAllowedImageHosts(" , ")).toEqual([]);
   });
+
+  it("takes the value in the shape Django's R2_PUBLIC_URL already holds it", () => {
+    // The point is that this setting and R2_PUBLIC_URL can hold the same
+    // string. Requiring the scheme to be stripped by hand is exactly the kind
+    // of mismatch that is only noticed when images stop sending.
+    expect(parseAllowedImageHosts("https://media.example.com")).toEqual(["media.example.com"]);
+    expect(parseAllowedImageHosts("https://media.example.com/")).toEqual(["media.example.com"]);
+    expect(parseAllowedImageHosts("media.example.com")).toEqual(["media.example.com"]);
+  });
+
+  it("accepts a mix of both forms in one list", () => {
+    expect(parseAllowedImageHosts("https://a.example, b.example"))
+      .toEqual(["a.example", "b.example"]);
+  });
+
+  it("drops a port, a path and a trailing slash", () => {
+    expect(parseAllowedImageHosts("https://a.example:8443/uploads/")).toEqual(["a.example"]);
+    expect(parseAllowedImageHosts("a.example:8443")).toEqual(["a.example"]);
+  });
+});
+
+describe("isImageUrlAllowed with the allowlist given as a URL", () => {
+  it("matches a host given in Django's format", () => {
+    const asUrl = "https://media.example.com";
+    expect(isImageUrlAllowed("https://media.example.com/a.webp", asUrl)).toBe(true);
+    expect(isImageUrlAllowed("https://tracker.evil.example/p.gif", asUrl)).toBe(false);
+  });
+
+  it("is equivalent however the same host is written", () => {
+    const url = "https://media.example.com/a.webp";
+    for (const setting of ["media.example.com", "https://media.example.com", "https://media.example.com/"]) {
+      expect(isImageUrlAllowed(url, setting)).toBe(true);
+    }
+  });
 });

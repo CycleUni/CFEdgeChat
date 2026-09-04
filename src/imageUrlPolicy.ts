@@ -17,11 +17,32 @@
  *  server still works. Nothing else may skip TLS. */
 const LOCAL_HTTP_HOSTNAMES = new Set(["localhost", "127.0.0.1"]);
 
+/**
+ * Normalize one allowlist entry to a bare hostname.
+ *
+ * Accepts what Django's R2_PUBLIC_URL holds ("https://media.example.com") as
+ * readily as a bare host ("media.example.com"), so the same value can be
+ * copied into this setting without being reshaped by hand — the two used to
+ * disagree on format, which is the kind of difference that is only discovered
+ * when images silently stop sending.
+ */
+function normalizeHost(entry: string): string | null {
+  const trimmed = entry.trim().toLowerCase();
+  if (!trimmed) return null;
+  try {
+    // Parsing both forms through URL also drops a port, a trailing slash and
+    // any path, and handles an IPv6 literal's brackets.
+    return new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`).hostname;
+  } catch {
+    return null;
+  }
+}
+
 export function parseAllowedImageHosts(raw: string | undefined): string[] {
   return (raw || "")
     .split(",")
-    .map(host => host.trim().toLowerCase())
-    .filter(Boolean);
+    .map(normalizeHost)
+    .filter((host): host is string => host !== null);
 }
 
 export function isImageUrlAllowed(rawUrl: string, allowedImageHosts: string | undefined): boolean {
