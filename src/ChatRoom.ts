@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { isImageUrlAllowed } from "./imageUrlPolicy";
 
 export interface Env {
   CHAT_ROOM: DurableObjectNamespace;
@@ -264,7 +265,7 @@ export class ChatRoom extends DurableObject<Env> {
       }
 
       if (messageType === "image") {
-        if (!this.isImageUrlAllowed(content)) {
+        if (!isImageUrlAllowed(content, this.env.ALLOWED_IMAGE_HOSTS)) {
           return new Response(JSON.stringify({
             code: "IMAGE_URL_NOT_ALLOWED",
             message: "Image content must be an https URL on an allowed host",
@@ -416,7 +417,7 @@ export class ChatRoom extends DurableObject<Env> {
             this.sendToSender(ws, { type: "error", message: "Image content must be a string URL" });
             return;
           }
-          if (!this.isImageUrlAllowed(data.content)) {
+          if (!isImageUrlAllowed(data.content, this.env.ALLOWED_IMAGE_HOSTS)) {
             // Coded like FORBIDDEN_SYSTEM_MESSAGE: the client has to tell this
             // refusal apart from a generic send failure to explain it, and the
             // sentence is only what this room happens to say today.
@@ -567,30 +568,6 @@ export class ChatRoom extends DurableObject<Env> {
         }),
       }).catch(e => console.error("Hub push failed", e));
     }));
-  }
-
-  // An image message is rendered as <img src> in every participant's
-  // browser, so its URL is the one piece of user input that makes the other
-  // party's browser fetch from an arbitrary server. https only (http is
-  // allowed for the local-dev media server), and when ALLOWED_IMAGE_HOSTS is
-  // configured the host must be on it — normally just the R2 public domain
-  // the upload endpoints issue.
-  private isImageUrlAllowed(rawUrl: string): boolean {
-    let parsed: URL;
-    try {
-      parsed = new URL(rawUrl);
-    } catch {
-      return false;
-    }
-    const isLocalHttp =
-      parsed.protocol === "http:" && (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1");
-    if (parsed.protocol !== "https:" && !isLocalHttp) return false;
-    const allowlist = (this.env.ALLOWED_IMAGE_HOSTS || "")
-      .split(",")
-      .map(h => h.trim().toLowerCase())
-      .filter(Boolean);
-    if (allowlist.length === 0) return true;
-    return allowlist.includes(parsed.hostname.toLowerCase());
   }
 
   // DJANGO_WEBHOOK_URL is operator-set config, not attacker-controlled input,
