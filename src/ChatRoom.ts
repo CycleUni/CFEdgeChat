@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { isImageUrlAllowed } from "./imageUrlPolicy";
+import { isWebhookUrlAllowed } from "./webhookUrlPolicy";
 
 export interface Env {
   CHAT_ROOM: DurableObjectNamespace;
@@ -486,7 +487,7 @@ export class ChatRoom extends DurableObject<Env> {
         const roomId = await this.ctx.storage.get<string>("roomId");
 
         // Trigger Webhook for Django to update Inbox Preview and optionally send push notifications
-        if (roomId && this.env.DJANGO_WEBHOOK_URL && this.isWebhookUrlAllowed(this.env.DJANGO_WEBHOOK_URL)) {
+        if (roomId && isWebhookUrlAllowed(this.env.DJANGO_WEBHOOK_URL)) {
           const webhookContent = messageType === "image" ? IMAGE_PREVIEW_TOKEN : data.content;
           this.triggerOfflineWebhook(roomId, userId, webhookContent, !otherUsersConnected);
         }
@@ -562,28 +563,16 @@ export class ChatRoom extends DurableObject<Env> {
         body: JSON.stringify({
           room_id: roomId,
           sender_id: senderId,
+          // Which participant this hub belongs to. The hub needs it to name a
+          // recipient for the offline email even when that user has never
+          // connected to their hub (so it holds no userId of its own).
+          recipient_id: participantId,
           preview,
           timestamp,
           self: isSelf,
         }),
       }).catch(e => console.error("Hub push failed", e));
     }));
-  }
-
-  // DJANGO_WEBHOOK_URL is operator-set config, not attacker-controlled input,
-  // but this still guards against a typo'd/misconfigured value turning into
-  // an SSRF vector — only allow https, or http to localhost for local dev.
-  private isWebhookUrlAllowed(rawUrl: string): boolean {
-    try {
-      const parsed = new URL(rawUrl);
-      if (parsed.protocol === "https:") return true;
-      if (parsed.protocol === "http:" && (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1")) {
-        return true;
-      }
-      return false;
-    } catch {
-      return false;
-    }
   }
 
   private deleteMessageForUser(ws: WebSocket, userId: string, messageId: string) {

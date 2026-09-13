@@ -1,10 +1,35 @@
 import { DurableObject } from "cloudflare:workers";
+import { shouldSendOfflineEmail } from "./offlineEmailPolicy";
+import { isWebhookUrlAllowed } from "./webhookUrlPolicy";
 
 export interface Env {
   CHAT_ROOM: DurableObjectNamespace;
   USER_HUB: DurableObjectNamespace;
   EDGE_CHAT_JWT_SECRET: string;
   DJANGO_WEBHOOK_URL?: string;
+  // Shared secret Django requires on every webhook call (X-Webhook-Secret);
+  // without it the offline-email callback is rejected with 403 and the
+  // recipient silently never hears about the message.
+  DJANGO_WEBHOOK_SECRET?: string;
+}
+
+// Rooms this user has already been emailed about and has not opened since.
+// Persisted (not in-memory) because the whole point is to still be true
+// after this DO hibernates — which it will, since nobody is connected to it
+// while its user is away.
+const EMAIL_NOTIFIED_KEY = "emailNotifiedRooms";
+
+// Body of a /push call from ChatRoom.
+interface PushPayload {
+  room_id: string;
+  sender_id: string;
+  // The hub's own user, passed explicitly by ChatRoom (which knows the
+  // participant list from the sender's signed token) so the email callback
+  // can name a recipient even on a hub that has never been connected to.
+  recipient_id?: string;
+  preview: string;
+  timestamp: number;
+  self?: boolean;
 }
 
 // Minimum time between accepted WebSocket connections for the same user's
@@ -52,6 +77,9 @@ export class UserHub extends DurableObject<Env> {
 
       this.ctx.acceptWebSocket(server);
       server.serializeAttachment({ userId });
+      // Remembered for the offline-email callback, which runs when there is
+      // no socket left to read the id off.
+      await this.ctx.storage.put("userId", userId);
 
       const requestedProtocol = request.headers.get("Sec-WebSocket-Protocol");
       const responseHeaders: HeadersInit | undefined = requestedProtocol
@@ -77,13 +105,7 @@ export class UserHub extends DurableObject<Env> {
     // their own hub from increment (their own send doesn't make their inbox
     // unread), and we increment /every other/ participant's unread set.
     if (request.method === "POST" && url.pathname.endsWith("/push")) {
-      const data = await request.json() as {
-        room_id: string;
-        sender_id: string;
-        preview: string;
-        timestamp: number;
-        self?: boolean;
-      };
+      const data = await request.json() as PushPayload;
       const roomUpdateMsg = JSON.stringify({ type: "room_update", ...data });
       for (const ws of this.ctx.getWebSockets()) {
         try {
@@ -98,6 +120,10 @@ export class UserHub extends DurableObject<Env> {
       if (!data.self) {
         await this.markUnread(data.room_id);
       }
+      // Separate from the unread mark on purpose: unread is per *message*
+      // state the badge reflects, this is a one-shot-per-conversation email
+      // for a user who has no way to see that badge right now.
+      await this.maybeSendOfflineEmail(data);
       return new Response("ok");
     }
 
@@ -148,6 +174,14 @@ export class UserHub extends DurableObject<Env> {
   }
 
   private async markRead(roomId: string): Promise<void> {
+    // Opening the conversation is what re-arms the email for it: from here on
+    // the next message that arrives while this user is away may notify again.
+    // Done before the early return below, because a room can be marked
+    // notified and then read from another device that had already cleared the
+    // unread flag — the mark would otherwise stick forever and silence every
+    // future notification for that conversation.
+    await this.clearEmailNotified(roomId);
+
     const unread = new Set((await this.ctx.storage.get<string[]>("unread")) || []);
     if (!unread.delete(roomId)) {
       // already read, no need to re-broadcast
@@ -172,6 +206,68 @@ export class UserHub extends DurableObject<Env> {
         console.error("Failed to send unread_count to socket", e);
       }
     }
+  }
+
+  // Emails the recipient about a message that arrived while they had the site
+  // closed — see shouldSendOfflineEmail for the two conditions. The Worker
+  // doesn't send mail itself: it calls the same Django webhook ChatRoom uses
+  // for the inbox mirror, with an `event` discriminator, and Django owns the
+  // templates, the address, and every "should this person be mailed at all"
+  // rule (deactivated account, conversation they deleted, ...).
+  private async maybeSendOfflineEmail(data: PushPayload): Promise<void> {
+    const notifiedRooms = (await this.ctx.storage.get<string[]>(EMAIL_NOTIFIED_KEY)) || [];
+    const decision = shouldSendOfflineEmail({
+      roomId: data.room_id,
+      isSelf: !!data.self,
+      // Counts every device/tab this user has open, hibernated ones included.
+      activeSocketCount: this.ctx.getWebSockets().length,
+      notifiedRooms,
+    });
+    if (!decision) return;
+
+    const webhookUrl = this.env.DJANGO_WEBHOOK_URL;
+    if (!isWebhookUrlAllowed(webhookUrl)) return;
+
+    const recipientId = data.recipient_id || (await this.ctx.storage.get<string>("userId"));
+    if (!recipientId) {
+      // Nothing to address the mail to. Leaving the room unmarked means a
+      // later message (by then carrying recipient_id) can still notify.
+      console.error("Offline email skipped: no recipient id for this hub");
+      return;
+    }
+
+    // Marked before the request goes out, not after: the send is a
+    // fire-and-forget waitUntil whose result nobody waits for, and one missed
+    // email (Django down) is a better failure than a burst of duplicates from
+    // every message that arrives while it is down. The mark clears the next
+    // time the recipient opens the conversation either way.
+    await this.ctx.storage.put(EMAIL_NOTIFIED_KEY, [...notifiedRooms, data.room_id]);
+
+    this.ctx.waitUntil(
+      fetch(webhookUrl!, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(this.env.DJANGO_WEBHOOK_SECRET ? { "X-Webhook-Secret": this.env.DJANGO_WEBHOOK_SECRET } : {}),
+        },
+        body: JSON.stringify({
+          // Distinguishes this from the inbox-preview mirror call ChatRoom
+          // makes to the same endpoint; Django dispatches on it.
+          event: "offline_email",
+          room_id: data.room_id,
+          recipient_id: recipientId,
+          sender_id: data.sender_id,
+          preview: data.preview,
+          timestamp: data.timestamp,
+        }),
+      }).catch(e => console.error("Offline email webhook failed", e))
+    );
+  }
+
+  private async clearEmailNotified(roomId: string): Promise<void> {
+    const notifiedRooms = (await this.ctx.storage.get<string[]>(EMAIL_NOTIFIED_KEY)) || [];
+    if (!notifiedRooms.includes(roomId)) return;
+    await this.ctx.storage.put(EMAIL_NOTIFIED_KEY, notifiedRooms.filter(id => id !== roomId));
   }
 
   // Client -> server messages aren't part of this protocol (the hub is
