@@ -14,7 +14,10 @@ EDGE_CHAT_JWT_SECRET=
 
 # ---- Optional (feature degrades gracefully if unset, not startup-blocking) ----
 # Webhook called on new/offline messages to UniBooks-BE; local default
-# http://127.0.0.1:8000/api/v1/messaging/webhook/edge-chat/
+# http://127.0.0.1:8000/api/v1/messaging/webhook/edge-chat/. Carries two kinds
+# of call: the inbox-preview mirror, and (event=offline_email) the request to
+# email a recipient who has no connection open to this Worker. Unset = no
+# preview sync and no email notification for messages missed while away.
 DJANGO_WEBHOOK_URL=
 # X-Webhook-Secret sent with DJANGO_WEBHOOK_URL calls, must exactly match
 # UniBooks-BE's EDGE_CHAT_WEBHOOK_SECRET. If unset, Django rejects the
