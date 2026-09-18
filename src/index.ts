@@ -109,9 +109,17 @@ export default {
     // Preflight for the REST history endpoint (the frontend's Authorization
     // header makes it a non-simple request). WebSocket upgrades never
     // trigger a CORS preflight, so this only matters for /api/... calls.
+    //
+    // Max-Age lets the browser reuse one preflight for two hours (Chrome's
+    // cap) instead of its 5-second default, which sent an OPTIONS ahead of
+    // nearly every history fetch and mark-read — each one a billed Worker
+    // request, and on the free plan those are the quota.
     if (request.method === "OPTIONS") {
       try {
-        return new Response(null, { status: 204, headers: corsHeaders(request, env) });
+        return new Response(null, {
+          status: 204,
+          headers: { ...corsHeaders(request, env), "Access-Control-Max-Age": "7200" },
+        });
       } catch (e) {
         if (e instanceof CorsConfigError) {
           console.error(e.message);

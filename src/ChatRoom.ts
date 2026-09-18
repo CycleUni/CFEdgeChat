@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { isImageUrlAllowed } from "./imageUrlPolicy";
 import { isWebhookUrlAllowed } from "./webhookUrlPolicy";
+import { completeClose } from "./wsClose";
 
 export interface Env {
   CHAT_ROOM: DurableObjectNamespace;
@@ -366,15 +367,7 @@ export class ChatRoom extends DurableObject<Env> {
       // Push to the user's own UserHub DO, which is the source of truth
       // for that user's unread state. The hub key is per-user, not per-room,
       // so a single fetch resolves it.
-      const hubId = this.env.USER_HUB.idFromName(userId);
-      const hubStub = this.env.USER_HUB.get(hubId);
-      await hubStub.fetch(
-        new Request("http://internal/read", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ room_id: roomId }),
-        })
-      );
+      await this.markReadInHub(userId, roomId);
       return new Response(null, { status: 204 });
     }
 
@@ -401,6 +394,18 @@ export class ChatRoom extends DurableObject<Env> {
           code: "READ_ONLY_TOKEN",
           message: "This token may read the room but not write to it",
         });
+        return;
+      }
+
+      // Mark-read over the socket the reader already has open. The REST
+      // /read above cost an OPTIONS and a POST — both billed Worker requests,
+      // the POST a DO request as well — for every live message that arrived
+      // in an open chat; a socket message is neither. Observers skip it: a
+      // moderator reading a report has no unread state in this room.
+      if (data.type === "read") {
+        if (state.role === "observer") return;
+        const roomId = await this.ctx.storage.get<string>("roomId");
+        if (roomId) await this.markReadInHub(userId, roomId);
         return;
       }
 
@@ -613,7 +618,22 @@ export class ChatRoom extends DurableObject<Env> {
 
   async webSocketClose(ws: WebSocket, code: number, reason: string, wasClean: boolean) {
     // No in-memory session map to clean up; the runtime drops closed
-    // sockets from getWebSockets() on its own.
+    // sockets from getWebSockets() on its own. The close frame itself still
+    // needs answering — see completeClose.
+    completeClose(ws, code, reason);
+  }
+
+  // The user's UserHub owns their unread state; it broadcasts the change to
+  // every device they have connected.
+  private async markReadInHub(userId: string, roomId: string): Promise<void> {
+    const hubStub = this.env.USER_HUB.get(this.env.USER_HUB.idFromName(userId));
+    await hubStub.fetch(
+      new Request("http://internal/read", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ room_id: roomId }),
+      })
+    );
   }
 
   async webSocketError(ws: WebSocket, error: unknown) {}

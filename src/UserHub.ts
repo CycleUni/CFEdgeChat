@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { shouldSendOfflineEmail } from "./offlineEmailPolicy";
 import { isWebhookUrlAllowed } from "./webhookUrlPolicy";
+import { completeClose } from "./wsClose";
 
 export interface Env {
   CHAT_ROOM: DurableObjectNamespace;
@@ -88,12 +89,16 @@ export class UserHub extends DurableObject<Env> {
 
       // Send a snapshot right after accept so the client can resync the badge
       // without waiting for the next room_update (covers the offline period
-      // where missed messages couldn't increment us).
-      server.serializeAttachment({
-        userId,
-        unread: await this.ctx.storage.get<string[]>("unread") || [],
-        lastReadAt: await this.ctx.storage.get<Record<string, number>>("lastReadAt") || {},
-      });
+      // where missed messages couldn't increment us). This comment used to
+      // describe the snapshot while the code only stashed it in the socket
+      // attachment and never sent it, so every client fetched it again over
+      // REST — an OPTIONS plus a GET, each a Worker request and the GET a DO
+      // request too, on every connect and reconnect. Queued now; the runtime
+      // delivers it once the handshake completes. /snapshot stays for
+      // clients built before this.
+      const unread = (await this.ctx.storage.get<string[]>("unread")) || [];
+      const lastReadAt = (await this.ctx.storage.get<Record<string, number>>("lastReadAt")) || {};
+      server.send(JSON.stringify({ type: "snapshot", unread, lastReadAt, count: unread.length }));
 
       return new Response(null, { status: 101, webSocket: client, headers: responseHeaders });
     }
@@ -274,7 +279,9 @@ export class UserHub extends DurableObject<Env> {
   // notify-only); anything received is ignored rather than acted on.
   async webSocketMessage(_ws: WebSocket, _message: string | ArrayBuffer) {}
 
-  async webSocketClose(_ws: WebSocket, _code: number, _reason: string, _wasClean: boolean) {}
+  async webSocketClose(ws: WebSocket, code: number, reason: string, _wasClean: boolean) {
+    completeClose(ws, code, reason);
+  }
 
   async webSocketError(_ws: WebSocket, _error: unknown) {}
 }
