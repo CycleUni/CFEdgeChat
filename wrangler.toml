@@ -3,30 +3,16 @@ main = "src/index.ts"
 compatibility_date = "2024-04-05"
 
 [vars]
-# EDGE_CHAT_JWT_SECRET will be provided via `wrangler secret put EDGE_CHAT_JWT_SECRET`
-# DJANGO_WEBHOOK_URL = "http://localhost:8000/api/v1/messaging/webhook/edge-chat/" (Can be set in environment variables)
-# DJANGO_WEBHOOK_SECRET must match Django's EDGE_CHAT_WEBHOOK_SECRET setting —
-# sent as the X-Webhook-Secret header on every call to DJANGO_WEBHOOK_URL.
-# Django rejects the call with 403 if this is missing or doesn't match.
-#
-# APP_ORIGINS / ENVIRONMENT are intentionally NOT set here.
-# Everything under [vars] gets reset to exactly what's listed in this file on
-# every `wrangler deploy` (including Cloudflare's git-integrated "Workers
-# Builds" auto-deploy on push) — so a real production origin list doesn't
-# belong here, it would need to be committed to the repo and would be easy to
-# leave stale (e.g. still pointing at localhost after a deploy).
-#
-# Instead, set them as Worker secrets, which persist across deploys and are
-# read the same way via `env.APP_ORIGINS` / `env.ENVIRONMENT`:
-#   wrangler secret put APP_ORIGINS
-#     (comma-separated, e.g. "https://unibooks.pages.dev,https://www.unibooks.tw")
-#   wrangler secret put ENVIRONMENT
-#     (only needed for local/staging to opt into the wildcard CORS fallback —
-#     set to "development"; omit entirely in production)
-# The dashboard's Settings > Variables > "Encrypt" toggle does the same thing.
-#
-# For local `wrangler dev`, put them in `.dev.vars` instead (see .dev.vars in
-# this directory) — that file is read as env vars locally and never deployed.
+# The following variables are public and can be safely committed to the repository.
+DJANGO_WEBHOOK_URL = "https://api.unibooks.app/api/v1/messaging/webhook/edge-chat/"
+APP_ORIGINS = "https://unibooks.app,https://unibooksfe.pages.dev"
+ALLOWED_IMAGE_HOSTS = "https://assets.unibooks.app"
+
+# Uncomment the following to override variables for Preview or Development environments:
+# [env.preview.vars]
+# DJANGO_WEBHOOK_URL = "https://dev-api.unibooks.app/api/v1/messaging/webhook/edge-chat/"
+# APP_ORIGINS = "http://localhost:4200"
+# ENVIRONMENT = "development"
 
 [[durable_objects.bindings]]
 name = "CHAT_ROOM"
