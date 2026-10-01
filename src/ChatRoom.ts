@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import { isImageUrlAllowed } from "./imageUrlPolicy";
 import { isWebhookUrlAllowed } from "./webhookUrlPolicy";
 import { completeClose } from "./wsClose";
+import { mayMarkRead } from "./markReadPolicy";
 
 export interface Env {
   CHAT_ROOM: DurableObjectNamespace;
@@ -400,10 +401,13 @@ export class ChatRoom extends DurableObject<Env> {
       // Mark-read over the socket the reader already has open. The REST
       // /read above cost an OPTIONS and a POST — both billed Worker requests,
       // the POST a DO request as well — for every live message that arrived
-      // in an open chat; a socket message is neither. Observers skip it: a
-      // moderator reading a report has no unread state in this room.
+      // in an open chat; a socket message is neither. A moderator observing
+      // a report has no unread state here and is skipped; a participant
+      // reading a deleted listing's chat (also an observer) is not — see
+      // markReadPolicy.
       if (data.type === "read") {
-        if (state.role === "observer") return;
+        const participantIds = await this.ctx.storage.get<string[]>("participantIds");
+        if (!mayMarkRead(state.role, userId, participantIds)) return;
         const roomId = await this.ctx.storage.get<string>("roomId");
         if (roomId) await this.markReadInHub(userId, roomId);
         return;
