@@ -1,8 +1,19 @@
 import { jwtVerify } from "jose";
-import { ChatRoom } from "./ChatRoom";
-import { UserHub } from "./UserHub";
+import * as Sentry from "@sentry/cloudflare";
+import { ChatRoom as ChatRoomBase } from "./ChatRoom";
+import { UserHub as UserHubBase } from "./UserHub";
 
-export { ChatRoom, UserHub };
+// With SENTRY_DSN unset the SDK stays off. Errors are reported with their
+// stack and request metadata only; no message bodies are attached.
+const sentryOptions = (env: Env) => ({
+  dsn: env.SENTRY_DSN,
+  tracesSampleRate: 0.1,
+});
+
+// wrangler.toml binds these by class name, so the instrumented classes must
+// be exported under the original names.
+export const ChatRoom = Sentry.instrumentDurableObjectWithSentry(sentryOptions, ChatRoomBase);
+export const UserHub = Sentry.instrumentDurableObjectWithSentry(sentryOptions, UserHubBase);
 
 export interface Env {
   CHAT_ROOM: DurableObjectNamespace;
@@ -20,6 +31,8 @@ export interface Env {
   // which is what a real deploy will be unless someone explicitly sets it)
   // is treated as production and requires APP_ORIGINS to be configured.
   ENVIRONMENT?: string;
+  // Sentry DSN for error reporting; unset disables it.
+  SENTRY_DSN?: string;
 }
 
 const ID_SEGMENT = /^[A-Za-z0-9_-]+$/;
@@ -104,7 +117,7 @@ function extractToken(request: Request): string | null {
   return null;
 }
 
-export default {
+export default Sentry.withSentry(sentryOptions, {
   async fetch(request: Request, env: Env): Promise<Response> {
     // Preflight for the REST history endpoint (the frontend's Authorization
     // header makes it a non-simple request). WebSocket upgrades never
@@ -262,4 +275,4 @@ export default {
       env
     );
   }
-};
+} satisfies ExportedHandler<Env>);

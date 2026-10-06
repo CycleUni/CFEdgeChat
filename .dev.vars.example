@@ -38,3 +38,6 @@ ENVIRONMENT=
 # "https://media.example.com" and a bare "media.example.com" are accepted.
 # Unset = any https host (local dev). See src/imageUrlPolicy.ts.
 ALLOWED_IMAGE_HOSTS=
+
+# Sentry DSN for error reporting (public ingest address, not a secret). Unset = off.
+SENTRY_DSN=
