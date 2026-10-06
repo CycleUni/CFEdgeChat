@@ -9,7 +9,7 @@ compatibility_flags = ["nodejs_als"]
 DJANGO_WEBHOOK_URL = "https://api.unibooks.app/api/v1/messaging/webhook/edge-chat/"
 APP_ORIGINS = "https://unibooks.app,https://unibooksfe.pages.dev"
 ALLOWED_IMAGE_HOSTS = "https://assets.unibooks.app"
-SENTRY_DSN = "https://bf9d311b3f2350549a7f2025ecd29431@o4512117291876352.ingest.us.sentry.io/4512211927498752"
+SENTRY_DSN = "https://0574e52187270d1b7b66ce2334262a3e@o4512117291876352.ingest.us.sentry.io/4512211942768640"
 
 # Uncomment the following to override variables for Preview or Development environments:
 # [env.preview.vars]
