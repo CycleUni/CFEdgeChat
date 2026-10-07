@@ -81,6 +81,7 @@ function withCors(response: Response, request: Request, env: Env): Response {
   } catch (e) {
     if (e instanceof CorsConfigError) {
       console.error(e.message);
+      Sentry.captureException(e);
       // Include the variable name in the client-visible body (not a secret
       // value, just which check failed) so a misconfiguration is diagnosable
       // straight from a browser's Network tab, without needing Worker logs.
@@ -144,6 +145,7 @@ export default Sentry.withSentry(sentryOptions, {
 
     if (!env.EDGE_CHAT_JWT_SECRET || env.EDGE_CHAT_JWT_SECRET.length < 32) {
       console.error("EDGE_CHAT_JWT_SECRET is missing or too short (need >= 32 chars)");
+      Sentry.captureMessage("EDGE_CHAT_JWT_SECRET is missing or too short", "fatal");
       return withCors(new Response("Chat service misconfigured: EDGE_CHAT_JWT_SECRET missing or invalid", { status: 500 }), request, env);
     }
 

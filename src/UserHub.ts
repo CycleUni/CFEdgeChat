@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import * as Sentry from "@sentry/cloudflare";
 import { shouldSendOfflineEmail } from "./offlineEmailPolicy";
 import { isWebhookUrlAllowed } from "./webhookUrlPolicy";
 import { completeClose } from "./wsClose";
@@ -238,6 +239,7 @@ export class UserHub extends DurableObject<Env> {
       // Nothing to address the mail to. Leaving the room unmarked means a
       // later message (by then carrying recipient_id) can still notify.
       console.error("Offline email skipped: no recipient id for this hub");
+      Sentry.captureMessage("Offline email skipped: no recipient id for this hub", "warning");
       return;
     }
 
@@ -265,7 +267,10 @@ export class UserHub extends DurableObject<Env> {
           preview: data.preview,
           timestamp: data.timestamp,
         }),
-      }).catch(e => console.error("Offline email webhook failed", e))
+      }).catch(e => {
+        console.error("Offline email webhook failed", e);
+        Sentry.captureException(e);
+      })
     );
   }
 

@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import * as Sentry from "@sentry/cloudflare";
 import { isImageUrlAllowed } from "./imageUrlPolicy";
 import { isWebhookUrlAllowed } from "./webhookUrlPolicy";
 import { completeClose } from "./wsClose";
@@ -511,6 +512,8 @@ export class ChatRoom extends DurableObject<Env> {
       }
     } catch (e) {
       console.error("Error processing websocket message", e);
+      // A body that is not valid JSON is the client's mistake, not ours.
+      if (!(e instanceof SyntaxError)) Sentry.captureException(e);
       this.sendToSender(ws, { type: "error", message: "Malformed message, failed to send" });
     }
   }
@@ -580,7 +583,10 @@ export class ChatRoom extends DurableObject<Env> {
           timestamp,
           self: isSelf,
         }),
-      }).catch(e => console.error("Hub push failed", e));
+      }).catch(e => {
+        console.error("Hub push failed", e);
+        Sentry.captureException(e);
+      });
     }));
   }
 
@@ -657,7 +663,10 @@ export class ChatRoom extends DurableObject<Env> {
           timestamp: Date.now(),
           is_offline: isOffline
         })
-      }).catch(e => console.error("Webhook failed", e))
+      }).catch(e => {
+        console.error("Webhook failed", e);
+        Sentry.captureException(e);
+      })
     );
   }
 }
