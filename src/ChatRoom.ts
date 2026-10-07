@@ -380,6 +380,9 @@ export class ChatRoom extends DurableObject<Env> {
     const state = ws.deserializeAttachment() as ConnectionState | undefined;
     if (!state?.userId || typeof message !== "string") return;
     const userId = state.userId;
+    // Errors from this message are tied to its sender by user id only — never
+    // email or name — so one user hitting a bug ten times reads as one user.
+    Sentry.setUser({ id: String(userId) });
 
     if (this.isRateLimited(ws, state)) {
       this.sendToSender(ws, { type: "error", message: "Rate limit exceeded, slow down" });

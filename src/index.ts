@@ -180,6 +180,8 @@ export default Sentry.withSentry(sentryOptions, {
         if (!userId) {
           return withCors(new Response("Unauthorized: Invalid token payload", { status: 401 }), request, env);
         }
+        // Id only, never email or name; see the same call in ChatRoom.
+        Sentry.setUser({ id: String(userId) });
 
         // A hub token proves identity only — it must match the hub being
         // connected to, or any authenticated user could listen in on
@@ -226,6 +228,8 @@ export default Sentry.withSentry(sentryOptions, {
         if (!userId) {
           return withCors(new Response("Unauthorized: Invalid token payload", { status: 401 }), request, env);
         }
+        // Id only, never email or name; see the same call in ChatRoom.
+        Sentry.setUser({ id: String(userId) });
 
         // The token is scoped to one app's room by the issuer (Django verifies
         // room membership before minting it). Without the app_id check, a
