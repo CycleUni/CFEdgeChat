@@ -105,8 +105,9 @@ export class UserHub extends DurableObject<Env> {
     }
 
     // Internal-only: reached exclusively via a direct DO stub call from
-    // ChatRoom (env.USER_HUB.get(id).fetch(...)), never routed through the
-    // Worker's public fetch() handler, so it needs no auth of its own.
+    // ChatRoom (env.USER_HUB.get(id).fetch(...)). The Worker's public route
+    // forwards only GET .../snapshot (see hubRoutePolicy), which is what lets
+    // this trust its payload without auth of its own.
     // The "sender_id" is the user who just sent the message — we exclude
     // their own hub from increment (their own send doesn't make their inbox
     // unread), and we increment /every other/ participant's unread set.
@@ -146,10 +147,9 @@ export class UserHub extends DurableObject<Env> {
     }
 
     // Mark a single room read for this user. POST body: { room_id }.
-    // Called from the fronted on conversation open; the Worker route is
-    // intentionally NOT reachable from the public internet (only /<app>/
-    // <room>/read under the per-room ChatRoom Channel); here for completeness
-    // so future admin tooling can hit it.
+    // Called by ChatRoom.markReadInHub on a direct stub; the public route does
+    // not forward it (see hubRoutePolicy) — the client marks a room read
+    // through the room itself.
     if (request.method === "POST" && url.pathname.endsWith("/read")) {
       const { room_id } = await request.json() as { room_id: string };
       if (!room_id) return new Response("Missing room_id", { status: 400 });

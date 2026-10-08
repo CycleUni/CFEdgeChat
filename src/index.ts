@@ -2,6 +2,7 @@ import { jwtVerify } from "jose";
 import * as Sentry from "@sentry/cloudflare";
 import { ChatRoom as ChatRoomBase } from "./ChatRoom";
 import { UserHub as UserHubBase } from "./UserHub";
+import { isPublicHubApiRequest } from "./hubRoutePolicy";
 
 // With SENTRY_DSN unset the SDK stays off. Errors are reported with their
 // stack and request metadata only; no message bodies are attached.
@@ -160,6 +161,9 @@ export default Sentry.withSentry(sentryOptions, {
     if (isUserHubWs || isUserHubApi) {
       if (isUserHubWs && request.headers.get("Upgrade") !== "websocket") {
         return withCors(new Response("Expected WebSocket upgrade", { status: 400 }), request, env);
+      }
+      if (isUserHubApi && !isPublicHubApiRequest(request.method, pathParts)) {
+        return withCors(new Response("Not found", { status: 404 }), request, env);
       }
 
       const pathUserId = isUserHubWs ? pathParts[2] : pathParts[3];
