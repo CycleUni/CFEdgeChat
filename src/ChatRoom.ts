@@ -5,6 +5,7 @@ import { isWebhookUrlAllowed } from "./webhookUrlPolicy";
 import { completeClose } from "./wsClose";
 import { mayMarkRead } from "./markReadPolicy";
 import { isSystemMessage } from "./systemMessagePolicy";
+import { isKnownMessageType, metadataError } from "./messagePolicy";
 
 export interface Env {
   CHAT_ROOM: DurableObjectNamespace;
@@ -63,7 +64,15 @@ interface ConnectionState {
   // Sliding count of messages sent within the current rate-limit window.
   windowStart: number;
   windowCount: number;
+  // When the token the socket was opened with expires, in ms. The Worker
+  // checks a token once, at connect; without this the socket kept its rights
+  // for as long as it stayed open, past a ban or a listing's deletion.
+  expiresAt?: number;
 }
+
+// Close code for a socket whose token has expired; the app reconnects with a
+// fresh token, which also carries the user's current rights in the room.
+export const TOKEN_EXPIRED_CLOSE_CODE = 4001;
 
 export class ChatRoom extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
@@ -168,7 +177,11 @@ export class ChatRoom extends DurableObject<Env> {
       // entries. See webSocketMessage() for the matching read side.
       this.ctx.acceptWebSocket(server);
       const role = (url.searchParams.get("role") as ConnectionState["role"]) || "user";
-      const state: ConnectionState = { userId, role, windowStart: Date.now(), windowCount: 0 };
+      const expSeconds = Number(url.searchParams.get("exp"));
+      const state: ConnectionState = {
+        userId, role, windowStart: Date.now(), windowCount: 0,
+        expiresAt: Number.isFinite(expSeconds) && expSeconds > 0 ? expSeconds * 1000 : undefined,
+      };
       server.serializeAttachment(state);
 
       // Echo back the negotiated subprotocol (the token, sent by the
@@ -253,6 +266,15 @@ export class ChatRoom extends DurableObject<Env> {
         return new Response("Missing content", { status: 400 });
       }
 
+      if (!isKnownMessageType(messageType)) {
+        return new Response("Invalid message_type", { status: 400 });
+      }
+
+      const restMetadataError = metadataError(metadata);
+      if (restMetadataError) {
+        return new Response(restMetadataError, { status: 400 });
+      }
+
       if (messageType === "text" && content.length > MAX_MESSAGE_LENGTH) {
         return new Response(`Message too long (max ${MAX_MESSAGE_LENGTH} chars)`, { status: 400 });
       }
@@ -263,9 +285,6 @@ export class ChatRoom extends DurableObject<Env> {
             code: "IMAGE_URL_NOT_ALLOWED",
             message: "Image content must be an https URL on an allowed host",
           }), { status: 400 });
-        }
-        if (metadata && typeof metadata !== "object") {
-          return new Response("Metadata must be an object", { status: 400 });
         }
       }
 
@@ -373,6 +392,15 @@ export class ChatRoom extends DurableObject<Env> {
     // email or name — so one user hitting a bug ten times reads as one user.
     Sentry.setUser({ id: String(userId) });
 
+    if (state.expiresAt !== undefined && Date.now() >= state.expiresAt) {
+      try {
+        ws.close(TOKEN_EXPIRED_CLOSE_CODE, "Token expired");
+      } catch (e) {
+        console.error("Failed to close an expired socket", e);
+      }
+      return;
+    }
+
     if (this.isRateLimited(ws, state)) {
       this.sendToSender(ws, { type: "error", message: "Rate limit exceeded, slow down" });
       return;
@@ -431,12 +459,14 @@ export class ChatRoom extends DurableObject<Env> {
             });
             return;
           }
-          if (metadata && typeof metadata !== "object") {
-            this.sendToSender(ws, { type: "error", message: "Metadata must be an object" });
-            return;
-          }
         } else {
           this.sendToSender(ws, { type: "error", message: "Invalid message_type" });
+          return;
+        }
+
+        const wsMetadataError = metadataError(metadata);
+        if (wsMetadataError) {
+          this.sendToSender(ws, { type: "error", message: wsMetadataError });
           return;
         }
 

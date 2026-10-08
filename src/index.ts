@@ -4,6 +4,9 @@ import { ChatRoom as ChatRoomBase } from "./ChatRoom";
 import { UserHub as UserHubBase } from "./UserHub";
 import { isPublicHubApiRequest } from "./hubRoutePolicy";
 
+// Every token Django mints carries an exp; one without would never expire.
+const JWT_VERIFY_OPTIONS = { algorithms: ["HS256"], requiredClaims: ["exp"] };
+
 // With SENTRY_DSN unset the SDK stays off. Errors are reported with their
 // stack and request metadata only; no message bodies are attached.
 const sentryOptions = (env: Env) => ({
@@ -178,7 +181,7 @@ export default Sentry.withSentry(sentryOptions, {
 
       try {
         const secret = new TextEncoder().encode(env.EDGE_CHAT_JWT_SECRET);
-        const { payload } = await jwtVerify(token, secret);
+        const { payload } = await jwtVerify(token, secret, JWT_VERIFY_OPTIONS);
         const userId = payload.user_id as string;
 
         if (!userId) {
@@ -191,7 +194,7 @@ export default Sentry.withSentry(sentryOptions, {
         // connected to, or any authenticated user could listen in on
         // another user's notification stream.
         if (String(userId) !== String(pathUserId)) {
-          return withCors(new Response(`Forbidden: Token not valid for this user (userId: ${userId}, path: ${pathUserId})`, { status: 403 }), request, env);
+          return withCors(new Response("Forbidden: Token not valid for this user", { status: 403 }), request, env);
         }
 
         const id = env.USER_HUB.idFromName(userId);
@@ -224,7 +227,7 @@ export default Sentry.withSentry(sentryOptions, {
 
       try {
         const secret = new TextEncoder().encode(env.EDGE_CHAT_JWT_SECRET);
-        const { payload } = await jwtVerify(token, secret);
+        const { payload } = await jwtVerify(token, secret, JWT_VERIFY_OPTIONS);
         const userId = payload.user_id as string;
         const tokenRoomId = payload.room_id as string | undefined;
         const tokenAppId = payload.app_id as string | undefined;
@@ -262,6 +265,10 @@ export default Sentry.withSentry(sentryOptions, {
         // participant_ids comes from the signed token, not the client, so
         // ChatRoom can trust it to know who to notify on their hub — see
         // ChatRoom's use of it in webSocketMessage.
+        // So the room can stop honouring this token once it expires: the
+        // check here runs only at connect, and a socket can stay open far
+        // longer than the token's two hours.
+        doUrl.searchParams.set("exp", String(payload.exp));
         const participantIds = payload.participant_ids as string[] | undefined;
         if (Array.isArray(participantIds)) {
           doUrl.searchParams.set("participantIds", participantIds.join(","));
