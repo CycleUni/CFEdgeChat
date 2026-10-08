@@ -4,6 +4,7 @@ import { isImageUrlAllowed } from "./imageUrlPolicy";
 import { isWebhookUrlAllowed } from "./webhookUrlPolicy";
 import { completeClose } from "./wsClose";
 import { mayMarkRead } from "./markReadPolicy";
+import { isSystemMessage } from "./systemMessagePolicy";
 
 export interface Env {
   CHAT_ROOM: DurableObjectNamespace;
@@ -38,15 +39,6 @@ const SEND_RATE_WINDOW_MS = 10_000;
 // this room, to blunt reconnect-storm abuse.
 const MIN_RECONNECT_INTERVAL_MS = 1_000;
 
-// System message prefixes that only 'system' role tokens can send
-const SYSTEM_MESSAGE_PREFIXES = [
-  "[SYSTEM:",
-  "[MEETUP_REQUEST]",
-  "[MEETUP_ACCEPT]",
-  "[MEETUP_DECLINE]",
-  "[MEETUP_CANCEL]",
-] as const;
-
 // Inbox-preview placeholder for an image message, sent to Django's inbox
 // mirror and to both participants' hubs. Carries an i18n key rather than
 // literal text: this preview is persisted server-side and shown to *both*
@@ -56,13 +48,10 @@ const SYSTEM_MESSAGE_PREFIXES = [
 //
 // Note this is only ever a *derived preview*, never inbound message content,
 // so it does not trip the isSystemMessage() guard below (which rejects
-// user-role senders using system prefixes) — the message body itself stays
+// user-role senders using control tokens) — the message body itself stays
 // the image URL.
 const IMAGE_PREVIEW_TOKEN = "[SYSTEM:msg.imagePlaceholder]";
 
-function isSystemMessage(content: string): boolean {
-  return SYSTEM_MESSAGE_PREFIXES.some(prefix => content.startsWith(prefix));
-}
 
 interface ConnectionState {
   userId: string;
